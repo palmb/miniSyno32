@@ -24,6 +24,7 @@ wlan = network.WLAN(network.STA_IF)
 tim0 = Timer(0)
 LED = Pin(2, Pin.OUT)
 
+
 # Ensure that this function is available, even on errors, because
 # it makes live a lot easier ;)
 def wlan_connect(ssid, pwd):
