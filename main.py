@@ -2,12 +2,16 @@ import machine
 import errno
 import network
 import sys
+import logging
 from machine import lightsleep, Pin, Timer
 import urequests as requests
 import time
 import webrepl
+import _credetials
 
-import logging
+SSID = _credetials.SSID
+WIFI_PWD = _credetials.WIFI_PWD
+URL = _credetials.URL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(None)  # root
@@ -19,11 +23,6 @@ ap = network.WLAN(network.AP_IF)
 wlan = network.WLAN(network.STA_IF)
 tim0 = Timer(0)
 LED = Pin(2, Pin.OUT)
-SSID = "Fooo"
-# SSID = "FAIL"
-WIFI_PWD = "****"
-URL = "some Url"
-
 
 # Ensure that this function is available, even on errors, because
 # it makes live a lot easier ;)
