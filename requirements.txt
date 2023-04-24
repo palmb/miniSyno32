@@ -1,3 +1,4 @@
 black
 esptool
 adafruit-ampy
+docopt
