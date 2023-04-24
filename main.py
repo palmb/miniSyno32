@@ -4,9 +4,9 @@ import network
 import sys
 import logging
 from machine import lightsleep, Pin, Timer
-import urequests as requests
+from mini_server import serve_website
+import urequests as requests    # noqa
 import time
-import webrepl
 import _credetials
 
 SSID = _credetials.SSID
@@ -25,9 +25,7 @@ tim0 = Timer(0)
 LED = Pin(2, Pin.OUT)
 
 
-# Ensure that this function is available, even on errors, because
-# it makes live a lot easier ;)
-def wlan_connect(ssid, pwd):
+def wlan_connect(ssid, pwd) -> bool:
     ap.active(False)
     wlan.active(True)
     if not wlan.isconnected():
@@ -41,8 +39,9 @@ def wlan_connect(ssid, pwd):
             time.sleep(1)
         else:
             info("failed :(")
-            return
+            return False
     info(f"network config: {wlan.ifconfig()}")
+    return True
 
 
 def ap_connect(
@@ -61,13 +60,6 @@ def toggle_led():
     LED.value(LED.value() ^ 1)
 
 
-def setup():
-    # let's calm down a bit
-    machine.freq(80000000)
-    time.sleep(1)
-    wlan_connect(SSID, WIFI_PWD)
-
-
 def is_syno_open():
     # todo: use select.poll
     #   https://docs.micropython.org/en/v1.19.1/library/select.html#select.poll
@@ -84,89 +76,43 @@ def is_syno_open():
         error(f"{type(e)}: {e}")
 
 
-def start_webrepl_timed(sec: int):
-    tim0.init(mode=Timer.ONE_SHOT, period=sec * 1000, callback=lambda t: webrepl.stop())
-    try:
-        webrepl.start_foreground()
-    except OSError as e:
-        if e.errno == errno.EBADF:
-            pass
-        else:
-            raise
-
-
 def loop():
+    global SSID, WIFI_PWD
     isopen = False
+    wlan_connect(SSID, WIFI_PWD)
 
-    while wlan.isconnected():
-        wasopen = isopen
-        isopen = is_syno_open()
-        if isopen != wasopen:
-            info(f"syno is open: {isopen}")
-            LED.on() if isopen else LED.off()
-        time.sleep_ms(1000)
+    while True:
 
-    ap_connect()
-    start_webrepl_timed(20)
+        while wlan.isconnected():
+            wasopen, isopen = isopen, is_syno_open()
+            if isopen != wasopen:
+                info(f"syno is open: {isopen}")
+                LED.on() if isopen else LED.off()
+            time.sleep_ms(1000)
 
-
-data = dict(action="close")
-
-import socket
-
-html = """<!DOCTYPE html>
-<html>
-    <head> <title>MiniSyno Wifi Settings</title> </head>
-    <form action="/wifi" method="GET">
-      <label for="ssid">SSID:</label>
-      <input type="text" id="ssid" name="ssid"><br><br>
-      <label for="pwd">Passwort:</label>
-      <input type="text" id="pwd" name="pwd"><br><br>
-      <input type="submit" value="Submit">
-    </form>
-    </body>
-</html>
-"""
-
-http_OK = "HTTP/1.0 200 OK\nContent-type: text/html\n\n"
-request = None
-
-
-def serve_website():
-    # https://randomnerdtutorials.com/esp32-esp8266-micropython-web-server/
-    global request
-    import gc
-    gc.collect()  # ensure old sockets to be closed
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.close()
-    s.bind(("0.0.0.0", 80))
-    s.listen(1)
-    ssid, pwd = "", ""
-    while ssid is "":
-        conn, addr = s.accept()
-        info(f"New connection from {addr}")
-        request = str(conn.recv(1024))
-        debug(f"{request=}")
-        i0 = request.find("?ssid=") + 6
-        i1 = request[i0:].find("&pwd=") + i0
-        i2 = request[i1:].find(" ") + i1
-        ssid = url_decode(request[i0:i1])
-        pwd = url_decode(request[i1 + 5 : i2])
-        info(f"new wifi config: {ssid=}, {pwd=}")
-        conn.send(http_OK)
-        conn.sendall(html)
-        conn.close()
+        # seems we have no wifi
+        # todo timeout
+        ap_connect()
+        ssid, pwd = serve_website()
+        # todo put in permanent storage
+        SSID, WIFI_PWD = ssid, pwd
+        wlan_connect(SSID, WIFI_PWD)
 
 
 def test():
-    webrepl.stop()
     ap_connect()
     serve_website()
 
+DEBUG = True
 
 if __name__ == "__main__":
-    test()
-    # print("enter setup")
-    # setup()
-    # print("enter loop")
-    # loop()
+    print("enter setup")
+    # let's calm down a bit
+    machine.freq(80000000)
+    time.sleep(1)
+    if DEBUG:
+        print("enter test")
+        test()
+    else:
+        print("enter loop")
+        loop()

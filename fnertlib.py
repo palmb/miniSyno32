@@ -1,22 +1,6 @@
 #!/usr/bin/env python
 from __future__ import annotations
-
-
-def url_decode(url):
-    result = ""
-    i = 0
-    while i < len(url):
-        if url[i] == "%":
-            result += chr(int(url[i + 1 : i + 3], 16))
-            i += 3
-        else:
-            if url[i] == "+":
-                c = " "
-            else:
-                c = url[i]
-            result += c
-            i += 1
-    return result
+import esp32  # noqa
 
 
 def cat(path):
@@ -26,3 +10,32 @@ def cat(path):
             print(line, end="")
         print()
 
+
+def store_wifi_config(ssid: str, pwd: str):
+    ns = esp32.NVS('wifi')
+    ns.set_blob('ssid', ssid.encode())
+    ns.set_blob('pwd', pwd.encode())
+    ns.commit()
+
+
+def bytearray_find(buf, b):
+    for i, c in enumerate(buf):
+        if c == b:
+            return i
+    return -1
+
+
+def load_wifi_config():
+    ns = esp32.NVS('wifi')
+
+    buf = bytearray(512)
+    ns.get_blob('ssid', buf)
+    i = max(bytearray_find(buf, 0), 0)
+    ssid = buf[:i].decode()
+
+    buf = bytearray(512)
+    ns.get_blob('pwd', buf)
+    i = max(bytearray_find(buf, 0), 0)
+    pwd = buf[:i].decode()
+
+    return ssid, pwd
