@@ -43,8 +43,8 @@ HTTP_OK = "HTTP/1.0 200 OK\nContent-type: text/html\n\n"
 
 # https://randomnerdtutorials.com/esp32-esp8266-micropython-web-server/
 def serve_website(timeout=None):
-    logger.info('serve website on 192.168.4.1')
-    logger.info(f'{timeout=}')
+    logger.info("serve website on 192.168.4.1")
+    logger.info(f"{timeout=}")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # reuse of address
@@ -60,9 +60,9 @@ def serve_website(timeout=None):
                     break
             else:
                 if timeout is not None:
-                    # set to 1 hour to enter credentials
+                    # set to 10 min to enter credentials
                     timeout = None
-                    sock.settimeout(60*60)
+                    sock.settimeout(60 * 10)
             logger.info(f"New connection from {addr}")
             request = str(conn.recv(1024))
             logger.debug(f"{request=}")
@@ -77,6 +77,5 @@ def serve_website(timeout=None):
             conn.close()
     finally:
         sock.close()
-        logger.info('website teared down')
+        logger.info("website teared down")
     return ssid, pwd
-
