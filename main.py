@@ -20,6 +20,9 @@ tim1 = Timer(1)
 status_led = Pin(2, Pin.OUT)
 syno_led = status_led
 
+second = 1000
+minute = second * 60
+
 RESET_CAUSES = {
     machine.PWRON_RESET: "POWERON_RESET",
     machine.HARD_RESET: "HARD_RESET",
@@ -100,6 +103,18 @@ def toggle_status_led():
     status_led.value(status_led.value() ^ 1)
 
 
+def bink_status_led(n, period=1000, dutycycle=0.5, maxtime=None):
+    high = int(period * dutycycle)
+    low = int(period * (1 - dutycycle))
+    if maxtime is not None:
+        n = maxtime // period
+    for _ in range(n):
+        status_led.on()
+        time.sleep_ms(high)
+        status_led.off()
+        time.sleep_ms(low)
+
+
 def ap_and_website(timeout):
     status_led.on()
     ap_connect()
@@ -116,15 +131,11 @@ def simple_run():
 
         if wlan.isconnected():
             # blink twice to signal that wifi is connected
-            for _ in range(2):
-                status_led.on()
-                time.sleep_ms(500)
-                status_led.off()
-                time.sleep_ms(500)
+            bink_status_led(2)
         else:
             raise OSError(9999, "could not connect to wifi")
 
-        wdt = MyWDT(1000 * 60 * 2)  # 2min
+        wdt = MyWDT(2 * minute)
 
         # for 30min check every second ..
         for _ in range(30 * 60):
@@ -134,7 +145,7 @@ def simple_run():
             wdt.feed()
 
         logger.info("now we get lazy and just check every minute")
-        wdt = MyWDT(1000 * 60 * 5)  # 5min
+        wdt = MyWDT(5 * minute)
 
         while True:
             isopen = is_syno_open()
@@ -145,6 +156,9 @@ def simple_run():
     except Exception as e:
         tim1.deinit()
         logger.error(repr(e))
+        if isinstance(e, OSError) and e.errno == 9999:
+            bink_status_led(1000, maxtime=5*minute)
+            machine.reset()
         logger.info("goning to deepsleep for 5 min and then restart the program")
         time.sleep(1)
         machine.deepsleep(5 * 60 * 1000)
