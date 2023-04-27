@@ -1,9 +1,7 @@
 import machine
-import errno
 import network
-import sys
 import logging
-from machine import lightsleep, Pin, Timer
+from machine import Pin, Timer
 
 import fnertlib
 from mini_server import serve_website
@@ -18,7 +16,9 @@ logger = logging.getLogger("main")  # root
 ap = network.WLAN(network.AP_IF)
 wlan = network.WLAN(network.STA_IF)
 tim0 = Timer(0)
-led = Pin(2, Pin.OUT)
+tim1 = Timer(1)
+status_led = Pin(2, Pin.OUT)
+syno_led = status_led
 
 RESET_CAUSES = {
     machine.PWRON_RESET: "POWERON_RESET",
@@ -30,26 +30,25 @@ RESET_CAUSES = {
 
 
 class MyWDT:
-    instance = None
-
     def __init__(self, timeout):
-        if MyWDT.instance is not None:
-            MyWDT.instance.stop()
-        MyWDT.instance = self
-
+        logger.debug('WDT init')
         self.timeout = timeout
-        self.tim = Timer(1)
+        self.tim = tim1
         self.feed()  # start
 
-    def _reset(self):
+    def _reset(self, timer):
         logger.critical("Watchdog timer triggered")
+        self.tim.deinit()
         time.sleep(1)
         machine.reset()
 
     def feed(self):
+        logger.debug('WDT feed')
+        self.tim.deinit()
         self.tim.init(mode=Timer.ONE_SHOT, period=self.timeout, callback=self._reset)
 
     def stop(self):
+        logger.debug('WDT stope')
         self.tim.deinit()
 
 
@@ -59,7 +58,7 @@ def wlan_connect(ssid, pwd):
     wlan.active(True)
     logger.info("connecting to network..")
     wlan.connect(ssid, pwd)
-    for i in range(60):
+    for i in range(30):
         if wlan.isconnected():
             logger.info("connected :D")
             logger.info(f"network config: {wlan.ifconfig()}")
@@ -91,63 +90,60 @@ def is_syno_open():
     if r.status_code != 200:
         raise OSError(9999, f"status code: {r.status_code}")
     isopen = r.content.decode()
+    r.close()
     if isopen in ["True", "False"]:
         return eval(isopen)
     raise ValueError(f"got unknown return value from URL: {isopen}")
 
 
-def toggle_led():
-    led.value(led.value() ^ 1)
+def toggle_status_led():
+    status_led.value(status_led.value() ^ 1)
 
 
 def ap_and_website(timeout):
-    tim0.init(mode=Timer.PERIODIC, period=500, callback=lambda t: toggle_led())
+    status_led.on()
     ap_connect()
     ssid, pwd = serve_website(timeout)
     tim0.deinit()
-    led.off()
+    status_led.off()
     return ssid, pwd
 
 
 def simple_run():
-    cause = machine.reset_cause()
-    if cause == machine.PWRON_RESET:
-        wait_for_connect = 90  # sec
-    else:
-        wait_for_connect = 30
-
     try:
-        wdt = MyWDT(1000*60*15)  # 10min
-
-        ssid, pwd = ap_and_website(wait_for_connect)
-        wdt.feed()
-        if ssid:
-            fnertlib.store_wifi_config(ssid, pwd)
         ssid, pwd = fnertlib.load_wifi_config()
         wlan_connect(ssid, pwd)
 
-        if not wlan.isconnected():
-            raise ConnectionError("could not connect to wifi")
+        if wlan.isconnected():
+            # blink twice to signal that wifi is connected
+            for _ in range(2):
+                status_led.on()
+                time.sleep_ms(500)
+                status_led.off()
+                time.sleep_ms(500)
+        else:
+            raise OSError(9999, "could not connect to wifi")
 
-        wdt = MyWDT(1000*60*2)  # 2min
+        wdt = MyWDT(1000 * 60 * 2)  # 2min
 
         # for 30min check every second ..
         for _ in range(30 * 60):
             isopen = is_syno_open()
-            led.on() if isopen else led.off()
+            syno_led.on() if isopen else syno_led.off()
             time.sleep(1)
             wdt.feed()
 
-        wdt = MyWDT(1000*60*5)  # 5min
+        logger.info("now we get lazy and just check every minute")
+        wdt = MyWDT(1000 * 60 * 5)  # 5min
 
-        # now we get lazy and just check every minute
         while True:
             isopen = is_syno_open()
-            led.on() if isopen else led.off()
+            status_led.on() if isopen else status_led.off()
             time.sleep(60)
             wdt.feed()
 
     except Exception as e:
+        tim1.deinit()
         logger.error(repr(e))
         logger.info("goning to deepsleep for 5 min and then restart the program")
         time.sleep(1)
@@ -157,7 +153,7 @@ def simple_run():
 def strore_credentials_initial(ssid, pwd, url):
     fnertlib.store_wifi_config(ssid, pwd)
     fnertlib.store_str_in_NVS("syno", "url", url)
-    fnertlib.store_str_in_NVS("system", "init", "done")
+    fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
 
 
 try:
@@ -165,12 +161,41 @@ try:
 except OSError as e:
     print(f"{repr(e)}. Most likely no initial credentials was provided..")
 
+
+def wifi_setup():
+    # state: nope -> maybe -> enter
+    status = fnertlib.load_str_from_NVS("system", "wifisetup")
+    logger.info(f"wifi setup status: {status}")
+    if status == 'nope':
+        fnertlib.store_str_in_NVS('system', 'wifisetup', 'maybe')
+    if status == 'maybe':
+        fnertlib.store_str_in_NVS('system', 'wifisetup', 'enter')
+    if status == 'enter':
+        logger.info(f"enter wifi setup")
+        fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
+        ssid, pwd = ap_and_website(None)
+        if ssid:
+            fnertlib.store_wifi_config(ssid, pwd)
+    else:
+        tim0.init(mode=Timer.PERIODIC, period=100, callback=lambda t: toggle_status_led())
+        time.sleep(3)
+        fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
+        tim0.deinit()
+        time.sleep_ms(50)
+        status_led.off()
+
+
 if __name__ == "__main__":
     cause = machine.reset_cause()
-    print(f"last reset was because of {RESET_CAUSES[cause]}({cause})")
-    print("enter setup")
+    cause_str = RESET_CAUSES.get(cause, "UNKNOWN")
+    logger.info(f"last reset was because of {cause_str}({cause})")
+    logger.info("start.. ")
     # let's calm down a bit
+    status_led.off()
+    tim0.deinit()
+    tim1.deinit()
     machine.freq(80000000)
     time.sleep(1)
-    print("lets gooooo... :)")
+    logger.info("lets gooooo... :)")
+    wifi_setup()
     simple_run()

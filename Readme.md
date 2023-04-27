@@ -8,18 +8,23 @@ credentials in its internal non-volatile memory. To change these credentials,
 for example if you use a new or other WIFI or your password has changed follow these 
 steps:
 
-1. Every time the board powers up, it creates its ***own* temporary Wifi for 90 
-   seconds**. It is named `miniSyno`.
-2. Connect to it with the following password: `make syno great again`
-3. Open your favorite browser and enter `192.168.4.1`. 
-   Ensure that you only enter the numbers and dots as they are, without any `http` or 
-   `www` upfront.
-4. You should see now a minimal website. Once you see this website you have 10 minutes 
-   to enter the new WIFI credentials for **your** WIFI.
-5. If you were too slow to connect simply power it up again - did you try turning it off and on again ;)
+1. Power up the board and wait for the blue status LED to blink fast (5 times per second)
+2. Reset the board during the blinking phase (switch off and on again)
+3. Do the same again: in the blinking phase reset the board again.
+4. Now the LED should be on permanently, and you successfully entered the WIFI setup. 
+5. The board now provide an **own** WIFI, named `miniSyno`.
+6. Connect to this WIFI with the password: `make syno great again`
+7. Open your favorite browser and enter `192.168.4.1`. Ensure that you only enter the 
+   numbers and dots as they are, without any `http` or `www` upfront.
+8. You should now see a minimal website, where you can enter the new WIFI credentials 
+   for **your** WIFI.
+9. As soon you hit the `Submit` button, the board will tear down the miniSyno-WIFI and
+   try to connect to your WIFI.
+10. Wait up to 30 seconds and observe the blue status LED. If the board can connect to
+    your WIFI, the LED should blink **twice** slowly (on for half a sec and off for 
+    half a sec). Otherwise, start again with step 1.
 
-> **Hint:** While the `miniSyno` WIFI is active the blue LED of the board flashes
-> twice a second.
+> **Hint:** While the `miniSyno` WIFI is active the blue LED of the board is on all the time
 
 
 # Development
@@ -31,18 +36,4 @@ steps:
 5. use `upload.sh` to copy all python files in the directory to the board. 
    Alternatively use `ampy` to do so. e.g. `ampy --p /dev/ttyUSBn put main.py /main.py`
 6. Run via REPL or by simply pressing reset/boot button on the device.
-
-
-# Errors
-
-### ImportError("Cannot import 'urequests'[...]")
-
-1. connect to device via REPL
-2. Ensure you have a working internet connection on the device, you might want to use the defined
-   `wlan_connect(ssid, pwd)` function.
-    ```pycon
-    >>> wlan_connect(...)
-    >>> import upip
-    >>> upip.install('urequests')
-    ```
 
