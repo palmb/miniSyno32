@@ -2,6 +2,7 @@ import machine
 import network
 import logging
 from machine import Pin, Timer
+import esp32  # noqa
 
 import fnertlib
 import urequests as requests  # noqa
@@ -13,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")  # root
 wlan = network.WLAN(network.STA_IF)
 status_led = Pin(2, Pin.OUT)
-pin = Pin(5, Pin.IN)
+pin = Pin(4, Pin.IN)
 
 second = 1000
 minute = second * 60
@@ -28,18 +29,19 @@ RESET_CAUSES = {
 
 
 def wlan_connect(ssid, pwd):
+    # DO NOT USE LOGGING HERE
     wlan.active(False)  # reset wlan
     wlan.active(True)
-    logger.info("connecting to network..")
+    print("connecting to network..")
     wlan.connect(ssid, pwd)
     for i in range(30):
         if wlan.isconnected():
-            logger.info("connected :D")
-            logger.info(f"network config: {wlan.ifconfig()}")
+            print("connected :D")
+            print(f"network config: {wlan.ifconfig()}")
             return
-        logger.info(f"waiting.. ({i})")
+        print(f"waiting.. ({i})")
         time.sleep(1)
-    logger.info("failed :(")
+    print("failed :(")
 
 
 def change_syno_state(action):
@@ -81,12 +83,17 @@ def simple_run():
         else:
             raise OSError(9999, "could not connect to wifi")
 
-        if pin.value():
-            print("pin is high")
-            change_syno_state(action='open')
-        else:
-            print("pin is low")
-            change_syno_state(action='close')
+        while wlan.isconnected():
+            status = pin.value()
+            if status:
+                print("pin is high")
+                change_syno_state(action='open')
+            else:
+                print("pin is low")
+                change_syno_state(action='close')
+            time.sleep(1)
+
+        raise RuntimeError("no wlan")
 
     except Exception as e:
         logger.error(repr(e))
@@ -96,12 +103,13 @@ def simple_run():
         logger.info("goning to deepsleep for 5 min and then restart the program")
         time.sleep(1)
         # todo: IRQ on pin high/low change
-        machine.deepsleep(5 * minute)
+        machine.deepsleep(1 * minute)
 
 
 def strore_credentials_initial(ssid, pwd, url):
     fnertlib.store_wifi_config(ssid, pwd)
     fnertlib.store_str_in_NVS("syno", "url", url)
+    print('OK')
 
 
 try:
