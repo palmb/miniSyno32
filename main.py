@@ -4,7 +4,6 @@ import logging
 from machine import Pin, Timer
 
 import fnertlib
-from mini_server import serve_website
 import urequests as requests  # noqa
 import time
 
@@ -12,13 +11,9 @@ URL = None
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")  # root
-
-ap = network.WLAN(network.AP_IF)
 wlan = network.WLAN(network.STA_IF)
-tim0 = Timer(0)
-tim1 = Timer(1)
 status_led = Pin(2, Pin.OUT)
-syno_led = status_led
+pin = Pin(5, Pin.IN)
 
 second = 1000
 minute = second * 60
@@ -32,31 +27,7 @@ RESET_CAUSES = {
 }
 
 
-class MyWDT:
-    def __init__(self, timeout):
-        logger.debug('WDT init')
-        self.timeout = timeout
-        self.tim = tim1
-        self.feed()  # start
-
-    def _reset(self, timer):
-        logger.critical("Watchdog timer triggered")
-        self.tim.deinit()
-        time.sleep(1)
-        machine.reset()
-
-    def feed(self):
-        logger.debug('WDT feed')
-        self.tim.deinit()
-        self.tim.init(mode=Timer.ONE_SHOT, period=self.timeout, callback=self._reset)
-
-    def stop(self):
-        logger.debug('WDT stope')
-        self.tim.deinit()
-
-
 def wlan_connect(ssid, pwd):
-    ap.active(False)
     wlan.active(False)  # reset wlan
     wlan.active(True)
     logger.info("connecting to network..")
@@ -71,32 +42,16 @@ def wlan_connect(ssid, pwd):
     logger.info("failed :(")
 
 
-def ap_connect(
-    essid="miniSyno",
-    channel=8,
-    authmode=network.AUTH_WPA_WPA2_PSK,
-    password="make syno great again",
-):
-    wlan.active(False)
-    ap.active(False)  # reset ap
-    ap.active(True)
-    ap.config(essid=essid, password=password, channel=channel, authmode=authmode)
-    logger.info(f"created wifi access point:\n\tSSID: {essid}\n\tPWD: {password}")
-    logger.info(f"connect to: 192.168.4.1")
-
-
-def is_syno_open():
-    # todo: use select.poll
-    #   https://docs.micropython.org/en/v1.19.1/library/select.html#select.poll
-    logger.debug(f"request: GET {URL}")
-    r = requests.get(URL)
+def change_syno_state(action):
+    if action not in ['open', 'close']:
+        raise ValueError(f'unknown action {action}')
+    url = f"{URL}?action={action}"
+    logger.debug(f"request: POST to {url}")
+    r = requests.post(url)
     if r.status_code != 200:
         raise OSError(9999, f"status code: {r.status_code}")
-    isopen = r.content.decode()
     r.close()
-    if isopen in ["True", "False"]:
-        return eval(isopen)
-    raise ValueError(f"got unknown return value from URL: {isopen}")
+    return
 
 
 def toggle_status_led():
@@ -115,15 +70,6 @@ def bink_status_led(n, period=1000, dutycycle=0.5, maxtime=None):
         time.sleep_ms(low)
 
 
-def ap_and_website(timeout):
-    status_led.on()
-    ap_connect()
-    ssid, pwd = serve_website(timeout)
-    tim0.deinit()
-    status_led.off()
-    return ssid, pwd
-
-
 def simple_run():
     try:
         ssid, pwd = fnertlib.load_wifi_config()
@@ -135,68 +81,33 @@ def simple_run():
         else:
             raise OSError(9999, "could not connect to wifi")
 
-        wdt = MyWDT(2 * minute)
-
-        # for 30min check every second ..
-        for _ in range(30 * 60):
-            isopen = is_syno_open()
-            syno_led.on() if isopen else syno_led.off()
-            time.sleep(1)
-            wdt.feed()
-
-        logger.info("now we get lazy and just check every minute")
-        wdt = MyWDT(5 * minute)
-
-        while True:
-            isopen = is_syno_open()
-            status_led.on() if isopen else status_led.off()
-            time.sleep(60)
-            wdt.feed()
+        if pin.value():
+            print("pin is high")
+            change_syno_state(action='open')
+        else:
+            print("pin is low")
+            change_syno_state(action='close')
 
     except Exception as e:
-        tim1.deinit()
         logger.error(repr(e))
         if isinstance(e, OSError) and e.errno == 9999:
             bink_status_led(1000, maxtime=5*minute)
             machine.reset()
         logger.info("goning to deepsleep for 5 min and then restart the program")
         time.sleep(1)
-        machine.deepsleep(5 * 60 * 1000)
+        # todo: IRQ on pin high/low change
+        machine.deepsleep(5 * minute)
 
 
 def strore_credentials_initial(ssid, pwd, url):
     fnertlib.store_wifi_config(ssid, pwd)
     fnertlib.store_str_in_NVS("syno", "url", url)
-    fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
 
 
 try:
     URL = fnertlib.load_str_from_NVS("syno", "url")
 except OSError as e:
     print(f"{repr(e)}. Most likely no initial credentials was provided..")
-
-
-def wifi_setup():
-    # state: nope -> maybe -> enter
-    status = fnertlib.load_str_from_NVS("system", "wifisetup")
-    logger.info(f"wifi setup status: {status}")
-    if status == 'nope':
-        fnertlib.store_str_in_NVS('system', 'wifisetup', 'maybe')
-    if status == 'maybe':
-        fnertlib.store_str_in_NVS('system', 'wifisetup', 'enter')
-    if status == 'enter':
-        logger.info(f"enter wifi setup")
-        fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
-        ssid, pwd = ap_and_website(None)
-        if ssid:
-            fnertlib.store_wifi_config(ssid, pwd)
-    else:
-        tim0.init(mode=Timer.PERIODIC, period=100, callback=lambda t: toggle_status_led())
-        time.sleep(3)
-        fnertlib.store_str_in_NVS('system', 'wifisetup', 'nope')
-        tim0.deinit()
-        time.sleep_ms(50)
-        status_led.off()
 
 
 if __name__ == "__main__":
@@ -206,10 +117,7 @@ if __name__ == "__main__":
     logger.info("start.. ")
     # let's calm down a bit
     status_led.off()
-    tim0.deinit()
-    tim1.deinit()
     machine.freq(80000000)
     time.sleep(1)
     logger.info("lets gooooo... :)")
-    wifi_setup()
     simple_run()
