@@ -32,15 +32,6 @@ ms_second = 1000
 ms_minute = ms_second * 60
 ms_hour = 60 * ms_minute
 
-RESET_CAUSES = {
-    machine.PWRON_RESET: "POWERON_RESET",
-    machine.HARD_RESET: "HARD_RESET",
-    machine.WDT_RESET: "WDT_RESET",
-    machine.DEEPSLEEP_RESET: "DEEPSLEEP_RESET",
-    machine.SOFT_RESET: "SOFT_RESET",
-}
-
-
 
 def change_syno_state(action):
     if action not in ["open", "close"]:
@@ -55,7 +46,7 @@ def change_syno_state(action):
 
 
 def simple_run():
-    is_on = wake_pin.value() == 1
+    is_high = wake_pin.value() == 1
 
     try:
         ssid, pwd = load_wifi_config()
@@ -67,7 +58,7 @@ def simple_run():
         else:
             raise OSError(9999, "could not connect to wifi")
 
-        if is_on:
+        if is_high:
             logger.info(f"{wake_pin=} is HIGH")
             change_syno_state(action="open")
             status_led.on()
@@ -75,6 +66,21 @@ def simple_run():
             logger.info(f"{wake_pin=} is LOW")
             change_syno_state(action="close")
             status_led.off()
+
+        # temp fast
+        while wlan.isconnected():
+            was_high = is_high
+            is_high = wake_pin.value() == 1
+            if was_high != is_high:
+                if is_high:
+                    logger.info(f"{wake_pin=} is HIGH")
+                    change_syno_state(action="open")
+                    status_led.on()
+                else:
+                    logger.info(f"{wake_pin=} is LOW")
+                    change_syno_state(action="close")
+                    status_led.off()
+            time.sleep(1)
 
     except Exception as e:
         logger.error(repr(e))
@@ -84,13 +90,17 @@ def simple_run():
         # exits here
         deepsleep(10 * ms_minute)
 
-    if is_on:
-        wake_pin.wake_on(level="high")
-    else:
+    if is_high:
         wake_pin.wake_on(level="low")
+    else:
+        wake_pin.wake_on(level="high")
 
     # exits here
-    deepsleep(1 * ms_hour)
+    if is_high + wake_pin.value() == 1:
+        t = 1
+    else:
+        t = 1 * ms_hour
+    deepsleep(t)
 
 
 try:
@@ -112,7 +122,7 @@ def test():
     deepsleep(1 * ms_hour)
 
 
-def run():
+if __name__ == '__main__':
     logger.info("start.. ")
     # let's calm down a bit
     status_led.off()
@@ -126,4 +136,5 @@ def run():
         logger.info("No new credentials")
 
     logger.info("lets gooooo... :)")
+    # esp32.gpio_deep_sleep_hold(True)
     simple_run()

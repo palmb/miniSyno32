@@ -5,9 +5,19 @@ import machine
 import time
 import network
 
+
+RESET_CAUSES = {
+    machine.PWRON_RESET: "POWERON_RESET",
+    machine.HARD_RESET: "HARD_RESET",
+    machine.WDT_RESET: "WDT_RESET",
+    machine.DEEPSLEEP_RESET: "DEEPSLEEP_RESET",
+    machine.SOFT_RESET: "SOFT_RESET",
+}
+
 # now extra dependencies pls
 wlan = network.WLAN(network.STA_IF)
 ap = network.WLAN(network.AP_IF)
+GLOBAL_GPIO_HOLD = False
 
 
 class WakePin:
@@ -22,7 +32,7 @@ class WakePin:
         else:
             level = esp32.WAKEUP_ANY_HIGH
         esp32.wake_on_ext0(pin=self.pin, level=level)
-        print(f"waiting for {self.pin} to become HIGH")
+        print(f"waiting for {self.pin} to become {'high' if level else 'low'}")
 
     def value(self, value=None):
         if value is not None:
@@ -34,7 +44,8 @@ class LedPin:
     def __init__(self, pid, value=None, keep_state_on_sleep=False):
         self.pid = pid
         self.pin = Pin(pid, mode=Pin.OUT, value=value)
-        self.hold = keep_state_on_sleep
+        self.hold = None
+        self.keep_state_on_sleep(keep_state_on_sleep)
         self.commit()
 
     def value(self, value=None):

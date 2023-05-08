@@ -1,20 +1,15 @@
-import machine
-import network
 import logging
-from machine import Pin, Timer
+import machine  # noqa
 
 from fnertlib import (
-    WakePin,
     LedPin,
     deepsleep,
     store_wifi_config,
     store_str_in_NVS,
     load_str_from_NVS,
-    load_str_from_NVS,
     load_wifi_config,
     wlan_connect,
     ap_connect,
-    ap,
     wlan,
 )
 from mini_server import serve_website
@@ -26,21 +21,13 @@ URL = None
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")  # root
 
-tim1 = Timer(1)
+tim1 = machine.Timer(1)
 STATUS_PNO = 2
 status_led = LedPin(STATUS_PNO, value=0, keep_state_on_sleep=True)
 syno_led = status_led
 
 second = 1000
 minute = second * 60
-
-RESET_CAUSES = {
-    machine.PWRON_RESET: "POWERON_RESET",
-    machine.HARD_RESET: "HARD_RESET",
-    machine.WDT_RESET: "WDT_RESET",
-    machine.DEEPSLEEP_RESET: "DEEPSLEEP_RESET",
-    machine.SOFT_RESET: "SOFT_RESET",
-}
 
 
 class WatchdogTim1:
@@ -59,7 +46,7 @@ class WatchdogTim1:
     def feed(self):
         logger.debug("WDT feed")
         self.tim.deinit()
-        self.tim.init(mode=Timer.ONE_SHOT, period=self.timeout, callback=self._reset)
+        self.tim.init(mode=machine.Timer.ONE_SHOT, period=self.timeout, callback=self._reset)
 
     def stop(self):
         logger.debug("WDT stope")
@@ -102,7 +89,8 @@ def simple_run():
         wdt = WatchdogTim1(2 * minute)
 
         # for 30min check every second ..
-        for _ in range(30 * 60):
+        for i in range(30 * 60):
+            print(f"second {i} since start")
             isopen = is_syno_open()
             syno_led.on() if isopen else syno_led.off()
             time.sleep(1)
@@ -111,21 +99,22 @@ def simple_run():
         logger.info("now we get lazy and just check every minute")
         wdt = WatchdogTim1(5 * minute)
 
+        i = 30
         while True:
             isopen = is_syno_open()
             status_led.on() if isopen else status_led.off()
+            i += 1
+            print(f"minute {i} since start")
             time.sleep(60)
             wdt.feed()
 
     except Exception as e:
-        tim1.deinit()
+        tim1.deinit()  # stop wdt
         logger.error(repr(e))
         if isinstance(e, OSError) and e.errno == 9999:
             status_led.blink(1000, maxtime=5 * minute)
             machine.reset()
-        logger.info("goning to deepsleep for 5 min and then restart the program")
-        time.sleep(1)
-        machine.deepsleep(5 * 60 * 1000)
+        deepsleep(5 * minute)
 
 
 try:
@@ -135,40 +124,41 @@ except OSError as e:
 
 
 def wifi_setup():
-    # state: nope -> maybe -> enter
-    status = load_str_from_NVS("system", "wifisetup")
-    print(f"WIFI-SETUP: {status=}")
-    if status == "nope":
-        store_str_in_NVS("system", "wifisetup", "maybe")
-    if status == "maybe":
+    # state: no -> (enter) -> no
+    state = load_str_from_NVS("system", "wifisetup")
+    print(f"WIFI-SETUP: {state=}")
+    if state == "no":
         store_str_in_NVS("system", "wifisetup", "enter")
-    if status == "enter":
-        logger.info(f"enter wifi setup")
-        store_str_in_NVS("system", "wifisetup", "nope")
+        # wait 3 secs and blink ... if the user press
+        # reset within the 3 secs, we eventually enter
+        # the next if-branch, otherwise we start normally
+        status_led.blink(1000, 100, maxtime=2 * second)
+        store_str_in_NVS("system", "wifisetup", "no")
+        time.sleep_ms(50)
+        status_led.off()
+    elif state == "enter":
+        store_str_in_NVS("system", "wifisetup", "no")
         ssid, pwd = ap_and_website(None)
         if ssid:
             store_wifi_config(ssid, pwd)
-    else:
-        status_led.blink(1000, 100, maxtime=3 * second)
-        store_str_in_NVS("system", "wifisetup", "nope")
-        time.sleep_ms(50)
-        status_led.off()
 
 
-def run():
+if __name__ == '__main__':
     logger.info("start.. ")
+    logger.info("try import store_credentials.py")
+    try:
+        import store_credentials
+    except ImportError:
+        logger.info("No credentials file")
+
+    if machine.reset_cause() == machine.PWRON_RESET:
+        wifi_setup()
+
     # let's calm down a bit
     status_led.off()
     tim1.deinit()
     machine.freq(80000000)
     time.sleep(1)
 
-    logger.info("try import store_credentials.py")
-    try:
-        import store_credentials
-    except ImportError:
-        logger.info("No new credentials")
-
     logger.info("lets gooooo... :)")
-    wifi_setup()
     simple_run()
