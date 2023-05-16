@@ -22,9 +22,8 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")  # root
 
 tim1 = machine.Timer(1)
-STATUS_PNO = 2
-status_led = LedPin(STATUS_PNO, value=0, keep_state_on_sleep=True)
-syno_led = status_led
+LED_blue = LedPin(2, value=0, keep_state_on_sleep=True)
+LED_syno = LedPin(14, value=0, keep_state_on_sleep=True)
 
 second = 1000
 minute = second * 60
@@ -46,7 +45,9 @@ class WatchdogTim1:
     def feed(self):
         logger.debug("WDT feed")
         self.tim.deinit()
-        self.tim.init(mode=machine.Timer.ONE_SHOT, period=self.timeout, callback=self._reset)
+        self.tim.init(
+            mode=machine.Timer.ONE_SHOT, period=self.timeout, callback=self._reset
+        )
 
     def stop(self):
         logger.debug("WDT stope")
@@ -68,11 +69,19 @@ def is_syno_open():
 
 
 def ap_and_website(timeout):
-    status_led.on()
+    LED_blue.on()
     ap_connect()
     ssid, pwd = serve_website(timeout)
-    status_led.off()
+    LED_blue.off()
     return ssid, pwd
+
+
+def set_SYNO(value):
+    """return True if state changed, otherwise False."""
+    old = LED_syno.value()
+    value = int(bool(value))
+    LED_syno.value(value)
+    return old != value
 
 
 def simple_run():
@@ -82,37 +91,42 @@ def simple_run():
 
         if wlan.isconnected():
             # blink twice to signal that wifi is connected
-            status_led.blink(2)
+            LED_blue.blink(2)
         else:
             raise OSError(9999, "could not connect to wifi")
 
-        wdt = WatchdogTim1(2 * minute)
-
-        # for 30min check every second ..
-        for i in range(30 * 60):
-            print(f"second {i} since start")
-            isopen = is_syno_open()
-            syno_led.on() if isopen else syno_led.off()
-            time.sleep(1)
-            wdt.feed()
-
-        logger.info("now we get lazy and just check every minute")
-        wdt = WatchdogTim1(5 * minute)
-
-        i = 30
+        i = 0
         while True:
-            isopen = is_syno_open()
-            status_led.on() if isopen else status_led.off()
-            i += 1
-            print(f"minute {i} since start")
-            time.sleep(60)
-            wdt.feed()
+
+            # for 30min check every second ..
+            logger.info("we check syno's online state every second")
+            wdt = WatchdogTim1(2 * minute)
+            j = 1200  # 20 min
+            while j > 0:
+                if set_SYNO(is_syno_open()):
+                    j = 1200  # 20 min
+                else:
+                    j -= 1
+                wdt.feed()
+                time.sleep(1)
+                i += 1
+                print(f"{i}s since start")
+
+            logger.info("we get tiered and check syno's online state just every minute")
+            wdt = WatchdogTim1(5 * minute)
+            while True:
+                if set_SYNO(is_syno_open()):
+                    break
+                wdt.feed()
+                time.sleep(60)
+                i += 60
+                print(f"{i}s since start")
 
     except Exception as e:
         tim1.deinit()  # stop wdt
         logger.error(repr(e))
         if isinstance(e, OSError) and e.errno == 9999:
-            status_led.blink(1000, maxtime=5 * minute)
+            LED_blue.blink(1000, maxtime=5 * minute)
             machine.reset()
         deepsleep(5 * minute)
 
@@ -132,10 +146,10 @@ def wifi_setup():
         # wait 3 secs and blink ... if the user press
         # reset within the 3 secs, we eventually enter
         # the next if-branch, otherwise we start normally
-        status_led.blink(1000, 100, maxtime=2 * second)
+        LED_blue.blink(1000, 100, maxtime=2 * second)
         store_str_in_NVS("system", "wifisetup", "no")
         time.sleep_ms(50)
-        status_led.off()
+        LED_blue.off()
     elif state == "enter":
         store_str_in_NVS("system", "wifisetup", "no")
         ssid, pwd = ap_and_website(None)
@@ -143,7 +157,7 @@ def wifi_setup():
             store_wifi_config(ssid, pwd)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logger.info("start.. ")
     logger.info("try import store_credentials.py")
     try:
@@ -155,7 +169,7 @@ if __name__ == '__main__':
         wifi_setup()
 
     # let's calm down a bit
-    status_led.off()
+    LED_blue.off()
     tim1.deinit()
     machine.freq(80000000)
     time.sleep(1)
