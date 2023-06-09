@@ -20,7 +20,11 @@ ap = network.WLAN(network.AP_IF)
 GLOBAL_GPIO_HOLD = False
 
 
-class WakePin:
+class CustomRuntimeError(OSError):
+    pass
+
+
+class DeepSleepWakePin:
     def __init__(self, pid, pull):
         self.pid = pid
         self.pin = Pin(pid, Pin.IN, pull, hold=True)
