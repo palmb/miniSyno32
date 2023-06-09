@@ -20,7 +20,7 @@ ap = network.WLAN(network.AP_IF)
 GLOBAL_GPIO_HOLD = False
 
 
-class CustomRuntimeError(OSError):
+class ConnectionError2(OSError):
     pass
 
 

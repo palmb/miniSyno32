@@ -11,6 +11,7 @@ from fnertlib import (
     load_wifi_config,
     wlan_connect,
     wlan,
+    ConnectionError2
 )
 import urequests as requests  # noqa
 import time
@@ -27,7 +28,7 @@ STATUS_PNO = 2
 WAKE_PNO = 14
 
 # globals
-asleep = True
+asleep = False
 status_led = LedPin(STATUS_PNO, value=0, keep_state_on_sleep=True)
 ir_pin = Pin(WAKE_PNO, Pin.IN, Pin.PULL_DOWN, hold=True)
 
@@ -51,7 +52,7 @@ def change_syno_state(action):
     logger.debug(f"request: POST to {url}")
     r = requests.post(url)
     if r.status_code != 200:
-        raise ConnectionError(f"POST failed, status code: {r.status_code}")
+        raise ConnectionError2(f"POST failed, status code: {r.status_code}")
     r.close()
 
 
@@ -74,19 +75,22 @@ def simple_run():
 
 def _simple_run():
     global asleep
+    asleep = False  # initial
+    last_value = ir_pin.value()
 
     while True:
 
-        if asleep:
-            time.sleep_ms(1)
+        if asleep and ir_pin.value() == last_value:
+            time.sleep_ms(10)
             continue
 
         logger.info('WAKE UP')
 
         if not wlan.isconnected():
-            raise ConnectionError("wifi not connected (anymore?)")
+            raise ConnectionError2("wifi not connected (anymore?)")
 
-        if ir_pin.value() == 1:
+        last_value = ir_pin.value()
+        if last_value:
             logger.info(f"{ir_pin=} is HIGH")
             change_syno_state(action="open")
             status_led.on()
